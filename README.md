@@ -17,5 +17,4 @@ cmake --build build
 ./mayya run /bin/sh [args]
 ```
 
-## Limitations
-- `/bin/bash` might currently only work with `sudo`
+NOTE: When using `/bin/bash` host shell prompt and container shell prompt can look identical. To fix this use `sudo` or `/bin/sh`.
