@@ -11,3 +11,11 @@ Mayya implements containerization primitives directly instead of relying on exis
 cmake -B build
 cmake --build build
 ```
+
+## Usage
+```
+./mayya run /bin/sh [args]
+```
+
+## Limitations
+- `/bin/bash` might currently only work with `sudo`
