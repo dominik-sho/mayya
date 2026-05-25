@@ -14,7 +14,8 @@ cmake --build build
 
 ## Usage
 ```
-./mayya run /bin/sh [args]
+sudo ./mayya run [OPTIONS] /bin/sh [ARG...]
 ```
-
-NOTE: When using `/bin/bash` host shell prompt and container shell prompt can look identical. To fix this use `sudo` or `/bin/sh`.
+### Options
+- `--hostname=<hostname>` Set the hostname of the container.
+- `--domainname=<domainname>` Set the domainname of the container.
