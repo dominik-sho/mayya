@@ -2,6 +2,7 @@
 #include <vector>
 #include <stdexcept>
 #include <sys/wait.h>
+#include <sys/mount.h>
 #include <signal.h>
 #include <cstring>
 #include <random>
@@ -9,6 +10,11 @@
 #include <iomanip>
 #include <variant>
 #include <optional>
+#include <filesystem>
+#include <sys/syscall.h>
+
+
+namespace fs = std::filesystem;
 
 
 struct RunArguments {
@@ -107,10 +113,22 @@ void setDomainname(const std::string& domainname) {
 }
 
 
-int execChild(void *arg_) {
+int pivot_root(fs::path new_root, fs::path put_old) {
+    return syscall(SYS_pivot_root, new_root.c_str(), put_old.c_str());
+}
+
+
+int stage2(void *arg_) {
 	int ret;
 	try {
 		ContainerConfig* config = static_cast<ContainerConfig*>(arg_);
+
+		// Mount procfs so tools like ps can see processes in the container's PID namespace.
+		if (mount("proc", "/proc", "proc", 0, nullptr) == -1) {
+			perror("mount proc");
+			std::exit(EXIT_FAILURE);
+		}
+
 		ret = execvp(config->cmd.at(0), const_cast<char* const*>(&config->cmd.data()[0]));
 		check(ret, "execvp failed: ");
 		ret = 0;
@@ -122,18 +140,55 @@ int execChild(void *arg_) {
 }
 
 
-int setupChild(void *arg_) {
+int stage1(void *arg_) {
 	int ret;
 	try {
 		ContainerConfig* config = static_cast<ContainerConfig*>(arg_);
-		unshare(CLONE_NEWUTS);
+		unshare(CLONE_NEWUTS | CLONE_NEWPID | CLONE_NEWNS);
+
 		// Set hostname
 		// TODO: write /etc/hostname, optionally generate /etc/hosts
 		setHostname(config->hostname);
 		if (!config->domainname.empty()) {
 			setDomainname(config->domainname);
 		}
-		int cpid = clone(execChild, allocateStack(), SIGCHLD, arg_);
+
+		fs::path root = "/home/dome/container-fs/root-fs";
+
+		// Make mount propagation private so future mounts/unmounts do not leak back to the host namespace.
+		mount(nullptr, "/", nullptr, MS_REC | MS_PRIVATE, nullptr);
+
+		// pivot_root() requires newRoot to be a mount point.
+		// A bind mount of a directory onto itself is the usual trick.
+		mount(root.c_str(), root.c_str(), nullptr, MS_BIND | MS_REC, nullptr);
+
+		// Directory where the old root will be moved after pivot_root().
+		fs::path oldRoot = root / ".oldroot";
+		fs::create_directory(oldRoot);
+
+		if (pivot_root(root, oldRoot) == -1) {
+			perror("pivot_root");
+			std::exit(EXIT_FAILURE);
+		}
+
+		// Make sure our current working directory is inside the new root.
+		if (chdir("/") == -1) {
+			perror("chdir");
+			std::exit(EXIT_FAILURE);
+		}
+		// Detach the old root filesystem.
+		// After this, processes inside the container can no longer access the host filesystem through the old root.
+		if (umount2("/.oldroot", MNT_DETACH) == -1) {
+			perror("umount2");
+			std::exit(EXIT_FAILURE);
+		}
+
+		// Cleanup the now-empty mount point.
+		fs::remove("/.oldroot");
+
+		setenv("PS1", "\\u@\\h:\\w# ", 1);
+
+		int cpid = clone(stage2, allocateStack(), SIGCHLD, arg_);
 		check(cpid, "clone failed: ");
 		int status;
 		auto wpid = waitpid(cpid, &status, 0);
@@ -165,7 +220,7 @@ void container_run(RunArguments args) {
 		config->cmd = args.cmd;
 
 		// Start setup child
-		int cpid = clone(setupChild, allocateStack(), SIGCHLD, static_cast<void*>(config));
+		int cpid = clone(stage1, allocateStack(), SIGCHLD, static_cast<void*>(config));
 		check(cpid, "clone failed: ");
 		int status;
 		auto wpid = waitpid(cpid, &status, 0);
