@@ -100,19 +100,6 @@ std::string generateId(std::size_t lengthInBytes) {
     return  ss.str();
 }
 
-
-void setHostname(const std::string& hostname) {
-	int ret = sethostname(hostname.c_str(), hostname.size());
-	check(ret, "sethostname failed: ");
-}
-
-
-void setDomainname(const std::string& domainname) {
-	int ret = setdomainname(domainname.c_str(), domainname.size());
-	check(ret, "setdomainname failed: ");
-}
-
-
 int pivot_root(fs::path new_root, fs::path put_old) {
     return syscall(SYS_pivot_root, new_root.c_str(), put_old.c_str());
 }
@@ -148,9 +135,11 @@ int stage1(void *arg_) {
 
 		// Set hostname
 		// TODO: write /etc/hostname, optionally generate /etc/hosts
-		setHostname(config->hostname);
+		ret = sethostname(config->hostname.c_str(), config->hostname.size());
+		check(ret, "sethostname failed: ");
 		if (!config->domainname.empty()) {
-			setDomainname(config->domainname);
+			ret = setdomainname(config->domainname.c_str(), config->domainname.size());
+			check(ret, "setdomainname failed: ");
 		}
 
 		fs::path root = "/home/dome/container-fs/root-fs";
