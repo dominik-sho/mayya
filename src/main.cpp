@@ -136,52 +136,49 @@ int stage1(void *arg_) {
 		// Set hostname
 		// TODO: write /etc/hostname, optionally generate /etc/hosts
 		ret = sethostname(config->hostname.c_str(), config->hostname.size());
-		check(ret, "sethostname failed: ");
+		check(ret, "sethostname() failed: ");
 		if (!config->domainname.empty()) {
 			ret = setdomainname(config->domainname.c_str(), config->domainname.size());
-			check(ret, "setdomainname failed: ");
+			check(ret, "setdomainname() failed: ");
 		}
 
 		fs::path root = "/home/dome/container-fs/root-fs";
 
 		// Make mount propagation private so future mounts/unmounts do not leak back to the host namespace.
 		mount(nullptr, "/", nullptr, MS_REC | MS_PRIVATE, nullptr);
+		check(ret, "mount() failed: ");
 
 		// pivot_root() requires newRoot to be a mount point.
 		// A bind mount of a directory onto itself is the usual trick.
 		mount(root.c_str(), root.c_str(), nullptr, MS_BIND | MS_REC, nullptr);
+		check(ret, "mount() failed: ");
 
 		// Directory where the old root will be moved after pivot_root().
 		fs::path oldRoot = root / ".oldroot";
 		fs::create_directory(oldRoot);
 
-		if (pivot_root(root, oldRoot) == -1) {
-			perror("pivot_root");
-			std::exit(EXIT_FAILURE);
-		}
+		ret = pivot_root(root, oldRoot);
+		check(ret, "pivot_root() failed: ");
 
 		// Make sure our current working directory is inside the new root.
-		if (chdir("/") == -1) {
-			perror("chdir");
-			std::exit(EXIT_FAILURE);
-		}
+		ret = chdir("/");
+		check(ret, "chdir() failed: ");
 		// Detach the old root filesystem.
 		// After this, processes inside the container can no longer access the host filesystem through the old root.
-		if (umount2("/.oldroot", MNT_DETACH) == -1) {
-			perror("umount2");
-			std::exit(EXIT_FAILURE);
-		}
+		ret = umount2("/.oldroot", MNT_DETACH);
+		check(ret, "umount2() failed: ");
 
 		// Cleanup the now-empty mount point.
 		fs::remove("/.oldroot");
 
-		setenv("PS1", "\\u@\\h:\\w# ", 1);
+		ret = setenv("PS1", "\\u@\\h:\\w# ", 1);
+		check(ret, "setenv() failed: ");
 
 		int cpid = clone(stage2, allocateStack(), SIGCHLD, arg_);
-		check(cpid, "clone failed: ");
+		check(cpid, "clone() failed: ");
 		int status;
 		auto wpid = waitpid(cpid, &status, 0);
-		check(cpid, "waitpid failed: ");
+		check(cpid, "waitpid() failed: ");
 		ret = 0;
 	} catch (const std::exception& e) {
 		std::cerr << "setupChild failed: " << e.what() << "\n";
@@ -210,10 +207,10 @@ void container_run(RunArguments args) {
 
 		// Start setup child
 		int cpid = clone(stage1, allocateStack(), SIGCHLD, static_cast<void*>(config));
-		check(cpid, "clone failed: ");
+		check(cpid, "clone() failed: ");
 		int status;
 		auto wpid = waitpid(cpid, &status, 0);
-		check(cpid, "waitpid failed: ");
+		check(cpid, "waitpid() failed: ");
 	} catch (const std::exception& e) {
 		std::cerr << "setupChild failed: " << e.what() << "\n";
 	}
