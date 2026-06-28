@@ -1,4 +1,5 @@
 #include <iostream>
+#include <fstream>
 #include <vector>
 #include <stdexcept>
 #include <sys/wait.h>
@@ -12,6 +13,7 @@
 #include <optional>
 #include <filesystem>
 #include <sys/syscall.h>
+#include <format>
 
 
 namespace fs = std::filesystem;
@@ -127,10 +129,31 @@ int stage2(void *arg_) {
 }
 
 
+void fwrite(const std::string& filename, const std::string& content) {
+	std::ofstream ofs(filename);
+	if (!ofs.is_open()) {
+		std::cerr << "Error, opening file " << filename << "\n";
+		exit(EXIT_FAILURE);
+	}
+	ofs << content;
+}
+
+
 int stage1(void *arg_) {
 	int ret;
 	try {
 		ContainerConfig* config = static_cast<ContainerConfig*>(arg_);
+
+		auto gid = getgid();
+		auto uid = getuid();
+		unshare(CLONE_NEWUSER);
+		fwrite("/proc/self/uid_map", std::format("{} {} {}\n", 0, uid, 1));
+		fwrite("/proc/self/setgroups", "deny\n");
+		fwrite("/proc/self/gid_map", std::format("{} {} {}\n", 0, gid, 1));
+		setresuid(0, 0, 0);
+		setresgid(0, 0, 0);
+
+
 		unshare(CLONE_NEWUTS | CLONE_NEWPID | CLONE_NEWNS);
 
 		// Set hostname
